@@ -1,0 +1,56 @@
+// Jenkinsfile — TEST FAILURE scenario
+// Simulates: JUnit test assertion failure
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo 'Compiling Java sources...'
+                echo '[INFO] BUILD SUCCESS'
+                echo 'Compilation successful.'
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                echo 'Running JUnit tests...'
+                echo ''
+                echo 'Tests run: 24, Failures: 2, Errors: 0, Skipped: 1'
+                echo ''
+                echo 'Failed tests:'
+                echo '  UserServiceTest.testCalculateDiscount:'
+                echo '    java.lang.AssertionError:'
+                echo '    Expected: 15.0'
+                echo '    but was: 0.0'
+                echo '    at com.app.service.UserServiceTest.testCalculateDiscount(UserServiceTest.java:42)'
+                echo ''
+                echo '  OrderServiceTest.testOrderTotal:'
+                echo '    java.lang.NullPointerException'
+                echo '    at com.app.service.OrderService.calculateTotal(OrderService.java:67)'
+                echo '    at com.app.service.OrderServiceTest.testOrderTotal(OrderServiceTest.java:31)'
+                echo ''
+                echo '[INFO] BUILD FAILURE'
+                error('Unit tests failed: 2 failures')
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying...'
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo '❌ Tests failed! Triggering self-healing...'
+        }
+    }
+}

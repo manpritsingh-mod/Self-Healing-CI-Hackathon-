@@ -1,0 +1,49 @@
+// Jenkinsfile — CONFIG ERROR scenario
+// Simulates: Missing configuration file / environment variable
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo 'Building application...'
+                echo '[INFO] BUILD SUCCESS'
+            }
+        }
+
+        stage('Config Validation') {
+            steps {
+                echo 'Validating configuration...'
+                echo 'Loading application.yml...'
+                echo 'java.io.FileNotFoundException: /config/application-prod.yml (No such file or directory)'
+                echo '    at java.io.FileInputStream.open0(Native Method)'
+                echo '    at java.io.FileInputStream.open(FileInputStream.java:195)'
+                echo '    at com.app.config.ConfigLoader.load(ConfigLoader.java:34)'
+                echo ''
+                echo 'ERROR: Required environment variable DATABASE_URL is not set'
+                echo 'ERROR: Required environment variable REDIS_HOST is not set'
+                echo ''
+                echo '[INFO] BUILD FAILURE'
+                error('Configuration validation failed: missing config file and env vars')
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying...'
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo '❌ Config error! Triggering self-healing...'
+        }
+    }
+}

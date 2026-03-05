@@ -1,0 +1,6 @@
+workflow-aggregator:latest
+git:latest
+pipeline-stage-view:latest
+blueocean:latest
+configuration-as-code:latest
+generic-webhook-trigger:latest

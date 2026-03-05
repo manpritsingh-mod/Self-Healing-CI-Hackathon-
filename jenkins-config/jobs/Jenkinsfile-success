@@ -1,0 +1,40 @@
+// Jenkinsfile — SUCCESS scenario (baseline for demo)
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo 'Building application...'
+                echo 'Compilation successful.'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Running unit tests...'
+                echo 'Tests run: 15, Failures: 0, Errors: 0, Skipped: 0'
+                echo 'BUILD SUCCESS'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying to staging...'
+                echo 'Deployment complete.'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+    }
+}
