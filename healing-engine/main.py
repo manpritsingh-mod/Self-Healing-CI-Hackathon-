@@ -1,66 +1,78 @@
 """
-Self-Healing CI/CD Engine — FastAPI Application Entry Point
+main.py — FastAPI Application Entry Point
+Self-Healing CI/CD Engine
 
-This is the main application file that:
-1. Creates the FastAPI app
-2. Registers all route modules
-3. Provides the /health endpoint
-4. Configures logging
-
-Run: uvicorn main:app --host 0.0.0.0 --port 5000 --reload
+Initializes services, mounts routes, and provides health/readiness checks.
 """
 
+import sys
+import os
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
 
-from config import APP_PORT, AI_PROVIDER, TOKEN_DAILY_LIMIT
-from models.schemas import HealthResponse
-from routes import webhook_routes, heal_routes, config_routes
+# Add healing-engine to sys.path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from routes.webhook_routes import router as webhook_router
+from routes.heal_routes import router as heal_router
+from routes.config_routes import router as config_router
+from services.vector_db_service import vector_db_service
+from core.token_budget import token_budget
+from config import ENGINE_PORT, ENGINE_HOST
 
-# ── Logging ──────────────────────────────────────────────────
+# ── Logging ──
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+    format="%(asctime)s | %(name)-20s | %(levelname)-7s | %(message)s",
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("healing-engine")
 
 
-# ── Lifespan (startup/shutdown) ──────────────────────────────
+# ── Lifespan (startup/shutdown) ──
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Runs on startup and shutdown."""
-    logger.info("═" * 60)
-    logger.info("  Self-Healing CI/CD Engine — Starting Up")
-    logger.info(f"  AI Provider: {AI_PROVIDER}")
-    logger.info(f"  Token Budget: {TOKEN_DAILY_LIMIT}/day")
-    logger.info(f"  Port: {APP_PORT}")
-    logger.info("═" * 60)
+    """Initialize services on startup, cleanup on shutdown."""
+    logger.info("═══ Self-Healing CI/CD Engine Starting ═══")
 
-    # TODO: Day 3 — initialize ChromaDB client here
-    # TODO: Day 2 — initialize AI service here
+    # Initialize ChromaDB (vector store + incident memory)
+    vector_db_service.initialize()
+    logger.info(f"ChromaDB initialized. {vector_db_service.get_stats()['total_documents']} documents.")
 
+    # Show budget status
+    budget = token_budget.get_status()
+    logger.info(f"Token budget: {budget['remaining']}/{budget['daily_limit']} remaining")
+
+    logger.info("═══ Engine Ready ═══")
     yield
 
-    logger.info("Self-Healing CI/CD Engine — Shutting Down")
+    # Shutdown
+    logger.info("Shutting down services...")
+    from services.ai_service import ai_service
+    from services.slack_service import slack_service
+    await ai_service.close()
+    await slack_service.close()
+    logger.info("═══ Engine Stopped ═══")
 
 
-# ── FastAPI App ──────────────────────────────────────────────
+# ── FastAPI App ──
 app = FastAPI(
     title="Self-Healing CI/CD Engine",
     description=(
-        "Agentic AI system that automatically diagnoses and fixes "
-        "CI/CD pipeline failures using 8 specialized agents, "
-        "dynamic prompting, and a confidence-bounded fix/validator loop."
+        "AI-powered CI/CD healing engine with multi-agent architecture.\n\n"
+        "**Pipeline**: Webhook → Detection → LogParser + GitDiff (parallel) → "
+        "Classify → VectorDB Cache → RootCause (LLM) → "
+        "ConfidenceLoop (Fix↔Validator) → Notify (Slack + Email)\n\n"
+        "**Agents**: Detection, LogParser, GitDiff, RootCause, Fix, Validator, Notify\n\n"
+        "**Key Feature**: Confidence Loop — two AI agents debate until ≥90% confidence"
     ),
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# CORS — allow Jenkins plugin and browser access
+# ── CORS ──
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -69,32 +81,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ── Register Routes ──────────────────────────────────────────
-app.include_router(webhook_routes.router)
-app.include_router(heal_routes.router)
-app.include_router(config_routes.router)
-
-
-# ── Health Check ─────────────────────────────────────────────
-@app.get("/health", response_model=HealthResponse, tags=["System"])
-async def health_check():
-    """System health check — used by Docker, monitoring, and Jenkins plugin."""
-    return HealthResponse(
-        status="healthy",
-        version="1.0.0",
-        ai_provider=AI_PROVIDER,
-        token_budget_remaining=TOKEN_DAILY_LIMIT,  # TODO: wire to actual budget
-    )
+# ── Routes ──
+app.include_router(webhook_router)
+app.include_router(heal_router)
+app.include_router(config_router)
 
 
-# ── Root ─────────────────────────────────────────────────────
-@app.get("/", tags=["System"])
-async def root():
-    """Root endpoint — redirect info."""
+# ── Health ──
+@app.get("/health", tags=["System"])
+async def health():
+    """Health check — returns OK if engine is running."""
     return {
-        "message": "Self-Healing CI/CD Engine",
-        "docs": "/docs",
-        "health": "/health",
+        "status": "healthy",
+        "service": "self-healing-cicd-engine",
         "version": "1.0.0",
     }
+
+
+@app.get("/ready", tags=["System"])
+async def readiness():
+    """Readiness check — verifies ChromaDB is accessible."""
+    try:
+        stats = vector_db_service.get_stats()
+        budget = token_budget.get_status()
+        return {
+            "ready": True,
+            "chroma_documents": stats["total_documents"],
+            "tokens_remaining": budget["remaining"],
+        }
+    except Exception as e:
+        return {"ready": False, "error": str(e)}
+
+
+# ── Run ──
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=ENGINE_HOST,
+        port=ENGINE_PORT,
+        reload=True,
+        log_level="info",
+    )
