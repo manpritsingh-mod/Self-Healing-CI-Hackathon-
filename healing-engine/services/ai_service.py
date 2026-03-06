@@ -52,56 +52,49 @@ class AIService:
     ) -> dict:
         """
         Send a prompt to the configured LLM provider.
-
-        Returns:
-            {
-                "content": str,        # Raw LLM response text
-                "tokens_used": int,    # Approximate token count
-                "provider": str,       # Provider used
-                "success": bool,
-            }
+        Automatically falls back to other configured providers if one fails.
         """
-        try:
-            if self.provider == "claude":
-                return await self._ask_claude(prompt, system_role, max_tokens, temperature)
-            elif self.provider == "openai":
-                return await self._ask_openai(prompt, system_role, max_tokens, temperature)
-            elif self.provider == "gemini":
-                return await self._ask_gemini(prompt, system_role, max_tokens, temperature)
-            else:
-                return await self._ask_ollama(prompt, system_role, max_tokens, temperature)
-        except Exception as e:
-            logger.error(f"[AI] Primary provider '{self.provider}' failed: {e}")
+        # Determine strict priority of available providers
+        providers_to_try = [self.provider]
+        
+        # Add other cloud providers if API keys are present
+        if OPENAI_API_KEY and "openai" not in providers_to_try:
+            providers_to_try.append("openai")
+        if GEMINI_API_KEY and "gemini" not in providers_to_try:
+            providers_to_try.append("gemini")
+        if CLAUDE_API_KEY and "claude" not in providers_to_try:
+            providers_to_try.append("claude")
+            
+        # Always append local Ollama as the absolute last resort
+        if "ollama" not in providers_to_try:
+            providers_to_try.append("ollama")
 
-            # Fallback: try Ollama first, then try others if Ollama fails
-            if self.provider != "ollama":
-                logger.info("[AI] Falling back to Ollama...")
-                try:
+        last_error = "No providers available"
+
+        for p in providers_to_try:
+            try:
+                if p == "claude":
+                    return await self._ask_claude(prompt, system_role, max_tokens, temperature)
+                elif p == "openai":
+                    return await self._ask_openai(prompt, system_role, max_tokens, temperature)
+                elif p == "gemini":
+                    return await self._ask_gemini(prompt, system_role, max_tokens, temperature)
+                elif p == "ollama":
                     return await self._ask_ollama(prompt, system_role, max_tokens, temperature)
-                except Exception as fallback_err:
-                    logger.error(f"[AI] Ollama fallback also failed: {fallback_err}")
-                    
-                    # Last resort fallback chain
-                    if CLAUDE_API_KEY and self.provider != "claude":
-                        logger.info("[AI] Falling back to Claude...")
-                        try:
-                            return await self._ask_claude(prompt, system_role, max_tokens, temperature)
-                        except Exception:
-                            pass
-                    elif OPENAI_API_KEY and self.provider != "openai":
-                        logger.info("[AI] Falling back to OpenAI...")
-                        try:
-                            return await self._ask_openai(prompt, system_role, max_tokens, temperature)
-                        except Exception:
-                            pass
+            except Exception as e:
+                logger.error(f"[AI] Provider '{p}' failed: {e}")
+                last_error = str(e)
+                logger.info(f"[AI] Trying next fallback provider...")
+                continue # Try the next one
 
-            return {
-                "content": "",
-                "tokens_used": 0,
-                "provider": "none",
-                "success": False,
-                "error": str(e),
-            }
+        logger.error("[AI] ALL available AI providers failed.")
+        return {
+            "content": "",
+            "tokens_used": 0,
+            "provider": "none",
+            "success": False,
+            "error": last_error,
+        }
 
     async def _ask_claude(
         self, prompt: str, system_role: str, max_tokens: int, temperature: float
