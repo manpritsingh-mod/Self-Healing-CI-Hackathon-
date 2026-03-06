@@ -25,6 +25,7 @@ from agents.log_parser_agent import LogParserAgent
 from agents.git_diff_agent import GitDiffAgent
 from agents.root_cause_agent import RootCauseAgent
 from core.confidence_loop import ConfidenceLoop
+from agents.notify_agent import NotifyAgent
 from services.jenkins_service import jenkins_service
 from services.vector_db_service import vector_db_service
 from core.token_budget import token_budget
@@ -146,6 +147,7 @@ class OrchestratorAgent(BaseAgent):
         self.git_diff = GitDiffAgent()
         self.root_cause_agent = RootCauseAgent()
         self.confidence_loop = ConfidenceLoop()
+        self.notify_agent = NotifyAgent()
 
     async def analyze(
         self,
@@ -281,6 +283,11 @@ class OrchestratorAgent(BaseAgent):
             total_tokens_used=tokens_total,
             processing_time_seconds=elapsed,
         )
+
+        # ── Step 8: Notify (Slack + Email + Chroma metadata) ──
+        logger.info("[ORCHESTRATOR] Step 8: Notify Agent")
+        agents_used.append("Notify")
+        await self.notify_agent.run(incident)
 
         logger.info(
             f"[ORCHESTRATOR] ═══ Complete: {resolution_mode.value} ═══\n"
