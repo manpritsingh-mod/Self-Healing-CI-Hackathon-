@@ -1,7 +1,7 @@
 """
 AI Service — Unified LLM Gateway
 Routes all AI calls through a single interface.
-Supports: Claude (primary) + Ollama (fallback).
+Supports: Claude, OpenAI, Gemini, and Ollama (fallback for all).
 
 Only 3 agents call this service:
   1. Root Cause Agent  (1 call)
@@ -15,7 +15,9 @@ import logging
 from typing import Optional
 from config import (
     AI_PROVIDER, CLAUDE_API_KEY, CLAUDE_MODEL,
-    OLLAMA_URL, OLLAMA_MODEL
+    OLLAMA_URL, OLLAMA_MODEL,
+    OPENAI_API_KEY, OPENAI_MODEL,
+    GEMINI_API_KEY, GEMINI_MODEL
 )
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,18 @@ class AIService:
         self.provider = AI_PROVIDER
         self.total_tokens_used = 0
         self._client = httpx.AsyncClient(timeout=60.0)
+        
+        # Initialize Gemini if available
+        if GEMINI_API_KEY:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=GEMINI_API_KEY)
+                self.gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+            except ImportError:
+                logger.warning("[AI] google-generativeai not installed, Gemini disabled")
+                self.gemini_model = None
+        else:
+            self.gemini_model = None
 
     async def ask(
         self,
@@ -43,32 +57,43 @@ class AIService:
             {
                 "content": str,        # Raw LLM response text
                 "tokens_used": int,    # Approximate token count
-                "provider": str,       # "claude" or "ollama"
+                "provider": str,       # Provider used
                 "success": bool,
             }
         """
         try:
             if self.provider == "claude":
                 return await self._ask_claude(prompt, system_role, max_tokens, temperature)
+            elif self.provider == "openai":
+                return await self._ask_openai(prompt, system_role, max_tokens, temperature)
+            elif self.provider == "gemini":
+                return await self._ask_gemini(prompt, system_role, max_tokens, temperature)
             else:
                 return await self._ask_ollama(prompt, system_role, max_tokens, temperature)
         except Exception as e:
             logger.error(f"[AI] Primary provider '{self.provider}' failed: {e}")
 
-            # Fallback: try the other provider
-            if self.provider == "claude":
+            # Fallback: try Ollama first, then try others if Ollama fails
+            if self.provider != "ollama":
                 logger.info("[AI] Falling back to Ollama...")
                 try:
                     return await self._ask_ollama(prompt, system_role, max_tokens, temperature)
                 except Exception as fallback_err:
                     logger.error(f"[AI] Ollama fallback also failed: {fallback_err}")
-            else:
-                logger.info("[AI] Falling back to Claude...")
-                if CLAUDE_API_KEY:
-                    try:
-                        return await self._ask_claude(prompt, system_role, max_tokens, temperature)
-                    except Exception as fallback_err:
-                        logger.error(f"[AI] Claude fallback also failed: {fallback_err}")
+                    
+                    # Last resort fallback chain
+                    if CLAUDE_API_KEY and self.provider != "claude":
+                        logger.info("[AI] Falling back to Claude...")
+                        try:
+                            return await self._ask_claude(prompt, system_role, max_tokens, temperature)
+                        except Exception:
+                            pass
+                    elif OPENAI_API_KEY and self.provider != "openai":
+                        logger.info("[AI] Falling back to OpenAI...")
+                        try:
+                            return await self._ask_openai(prompt, system_role, max_tokens, temperature)
+                        except Exception:
+                            pass
 
             return {
                 "content": "",
@@ -82,6 +107,9 @@ class AIService:
         self, prompt: str, system_role: str, max_tokens: int, temperature: float
     ) -> dict:
         """Call Claude API (Anthropic)."""
+        if not CLAUDE_API_KEY:
+            raise ValueError("CLAUDE_API_KEY not configured")
+            
         logger.info(f"[AI] Calling Claude ({CLAUDE_MODEL})...")
 
         response = await self._client.post(
@@ -115,6 +143,92 @@ class AIService:
             "provider": "claude",
             "success": True,
         }
+
+    async def _ask_openai(
+        self, prompt: str, system_role: str, max_tokens: int, temperature: float
+    ) -> dict:
+        """Call OpenAI API."""
+        if not OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY not configured")
+            
+        logger.info(f"[AI] Calling OpenAI ({OPENAI_MODEL})...")
+
+        response = await self._client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENAI_MODEL,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": [
+                    {"role": "system", "content": system_role},
+                    {"role": "user", "content": prompt}
+                ],
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        content = data["choices"][0]["message"]["content"]
+        tokens = data.get("usage", {}).get("total_tokens", 0)
+        self.total_tokens_used += tokens
+
+        logger.info(f"[AI] OpenAI response: {tokens} tokens used")
+
+        return {
+            "content": content,
+            "tokens_used": tokens,
+            "provider": "openai",
+            "success": True,
+        }
+
+    async def _ask_gemini(
+        self, prompt: str, system_role: str, max_tokens: int, temperature: float
+    ) -> dict:
+        """Call Google Gemini API."""
+        if not self.gemini_model:
+            raise ValueError("Gemini model not initialized (missing API key or module)")
+            
+        logger.info(f"[AI] Calling Gemini ({GEMINI_MODEL})...")
+
+        try:
+            import google.generativeai as genai
+            
+            # Combine system role and prompt since Gemini expects it 
+            # as a single instruction set for standard chat completions
+            full_prompt = f"SYSTEM INSTRUCTION: {system_role}\n\nUSER PROMPT:\n{prompt}"
+            
+            response = await self.gemini_model.generate_content_async(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            )
+            
+            content = response.text
+            
+            # Rough token estimate if proper usage isn't nested right
+            try:
+                tokens = response.usage_metadata.total_token_count
+            except AttributeError:
+                tokens = len(full_prompt.split()) + len(content.split())
+                
+            self.total_tokens_used += tokens
+            logger.info(f"[AI] Gemini response: ~{tokens} tokens used")
+
+            return {
+                "content": content,
+                "tokens_used": tokens,
+                "provider": "gemini",
+                "success": True,
+            }
+        except Exception as e:
+            logger.error(f"[AI] Gemini error details: {e}")
+            raise
 
     async def _ask_ollama(
         self, prompt: str, system_role: str, max_tokens: int, temperature: float

@@ -10,11 +10,15 @@ load_dotenv()
 
 
 # ── AI Provider ──────────────────────────────────────────────
-AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama")  # claude | ollama
+AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama")  # claude | ollama | openai | gemini
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # ── Jenkins ──────────────────────────────────────────────────
 JENKINS_URL = os.getenv("JENKINS_URL", "http://jenkins:8080")
@@ -33,6 +37,8 @@ NOTIFICATION_EMAIL = os.getenv("NOTIFICATION_EMAIL", "")
 
 # ── Engine Config ────────────────────────────────────────────
 APP_PORT = int(os.getenv("APP_PORT", "5000"))
+ENGINE_PORT = APP_PORT
+ENGINE_HOST = os.getenv("ENGINE_HOST", "0.0.0.0")
 CONFIDENCE_THRESHOLD = int(os.getenv("CONFIDENCE_THRESHOLD", "90"))
 MAX_LOOPS = int(os.getenv("MAX_LOOPS", "3"))
 TOKEN_DAILY_LIMIT = int(os.getenv("TOKEN_DAILY_LIMIT", "50000"))
