@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
     container_name: jenkins
     ports:
-      - "8080:8080"
+      - "9080:8080"
       - "50000:50000"
     volumes:
       - jenkins_data:/var/jenkins_home

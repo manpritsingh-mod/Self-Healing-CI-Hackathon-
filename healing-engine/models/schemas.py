@@ -88,6 +88,7 @@ class FixResult(BaseModel):
     fix_description: str = ""
     fix_code: Optional[str] = None
     fix_steps: List[str] = Field(default_factory=list)
+    confidence: int = 0
 
 
 class ValidatorResult(BaseModel):
